@@ -30,11 +30,12 @@ pub enum MyDataType {
 /// this library makes no attempt to check this consistency. For instance, it is
 /// up to the user code in this example to make sure no parameter is created
 /// with a DataType of Scalar and a ValueType of Vec2.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(serde::Serialize, serde::Deserialize))]
 pub enum MyValueType {
     Vec2 { value: egui::Vec2 },
     Scalar { value: f32 },
+    Array { values: Vec<MyValueType> },
 }
 
 impl Default for MyValueType {
@@ -61,6 +62,16 @@ impl MyValueType {
             Ok(value)
         } else {
             anyhow::bail!("Invalid cast from {:?} to scalar", self)
+        }
+    }
+
+    pub fn try_to_scalar_array(self) -> anyhow::Result<Vec<f32>> {
+        match self {
+            MyValueType::Array { values } => {
+                values.into_iter().map(MyValueType::try_to_scalar).collect()
+            }
+            MyValueType::Scalar { value } => Ok(vec![value]),
+            other => anyhow::bail!("Invalid cast from {:?} to scalar array", other),
         }
     }
 }
@@ -169,6 +180,17 @@ impl NodeTemplateTrait for MyNodeTemplate {
                 true,
             );
         };
+        let input_scalar_wide = |graph: &mut MyGraph, name: &str| {
+            graph.add_wide_input_param(
+                node_id,
+                name.to_string(),
+                MyDataType::Scalar,
+                MyValueType::Scalar { value: 0.0 },
+                InputParamKind::ConnectionOrConstant,
+                None,
+                true,
+            );
+        };
         let input_vector = |graph: &mut MyGraph, name: &str| {
             graph.add_input_param(
                 node_id,
@@ -191,24 +213,7 @@ impl NodeTemplateTrait for MyNodeTemplate {
 
         match self {
             MyNodeTemplate::AddScalar => {
-                // The first input param doesn't use the closure so we can comment
-                // it in more detail.
-                graph.add_input_param(
-                    node_id,
-                    // This is the name of the parameter. Can be later used to
-                    // retrieve the value. Parameter names should be unique.
-                    "A".into(),
-                    // The data type for this input. In this case, a scalar
-                    MyDataType::Scalar,
-                    // The value type for this input. We store zero as default
-                    MyValueType::Scalar { value: 0.0 },
-                    // The input parameter kind. This allows defining whether a
-                    // parameter accepts input connections and/or an inline
-                    // widget to set its value.
-                    InputParamKind::ConnectionOrConstant,
-                    true,
-                );
-                input_scalar(graph, "B");
+                input_scalar_wide(graph, "args");
                 output_scalar(graph, "out");
             }
             MyNodeTemplate::SubtractScalar => {
@@ -294,6 +299,7 @@ impl WidgetValueTrait for MyValueType {
                     ui.add(DragValue::new(value));
                 });
             }
+            MyValueType::Array { .. } => {}
         }
         // This allows you to return your responses from the inline widgets.
         Vec::new()
@@ -496,6 +502,9 @@ pub fn evaluate_node(
         fn input_scalar(&mut self, name: &str) -> anyhow::Result<f32> {
             self.evaluate_input(name)?.try_to_scalar()
         }
+        fn input_scalar_array(&mut self, name: &str) -> anyhow::Result<Vec<f32>> {
+            self.evaluate_input(name)?.try_to_scalar_array()
+        }
         fn output_vector(&mut self, name: &str, value: egui::Vec2) -> anyhow::Result<MyValueType> {
             self.populate_output(name, MyValueType::Vec2 { value })
         }
@@ -508,9 +517,8 @@ pub fn evaluate_node(
     let mut evaluator = Evaluator::new(graph, outputs_cache, node_id);
     match node.user_data.template {
         MyNodeTemplate::AddScalar => {
-            let a = evaluator.input_scalar("A")?;
-            let b = evaluator.input_scalar("B")?;
-            evaluator.output_scalar("out", a + b)
+            let args = evaluator.input_scalar_array("args")?;
+            evaluator.output_scalar("out", args.iter().sum())
         }
         MyNodeTemplate::SubtractScalar => {
             let a = evaluator.input_scalar("A")?;
@@ -552,7 +560,7 @@ fn populate_output(
     value: MyValueType,
 ) -> anyhow::Result<MyValueType> {
     let output_id = graph[node_id].get_output(param_name)?;
-    outputs_cache.insert(output_id, value);
+    outputs_cache.insert(output_id, value.clone());
     Ok(value)
 }
 
@@ -565,27 +573,55 @@ fn evaluate_input(
 ) -> anyhow::Result<MyValueType> {
     let input_id = graph[node_id].get_input(param_name)?;
 
-    // The output of another node is connected.
-    if let Some(other_output_id) = graph.connection(input_id) {
-        // The value was already computed due to the evaluation of some other
-        // node. We simply return value from the cache.
-        if let Some(other_value) = outputs_cache.get(&other_output_id) {
-            Ok(*other_value)
-        }
-        // This is the first time encountering this node, so we need to
-        // recursively evaluate it.
-        else {
-            // Calling this will populate the cache
-            evaluate_node(graph, graph[other_output_id].node, outputs_cache)?;
+    let conns = graph.connections(input_id);
+    match conns.len() {
+        0 => Ok(graph[input_id].value.clone()),
+        1 => {
+            let out_id = *conns.iter().next().unwrap();
+            // The value was already computed due to the evaluation of some other
+            // node. We simply return value from the cache.
+            if let Some(other_value) = outputs_cache.get(&out_id) {
+                Ok(other_value.clone())
+            }
+            // This is the first time encountering this node, so we need to
+            // recursively evaluate it.
+            else {
+                // Calling this will populate the cache
+                evaluate_node(graph, graph[out_id].node, outputs_cache)?;
 
-            // Now that we know the value is cached, return it
-            Ok(*outputs_cache
-                .get(&other_output_id)
-                .expect("Cache should be populated"))
+                // Now that we know the value is cached, return it
+                Ok(outputs_cache
+                    .get(&out_id)
+                    .expect("Cache should be populated")
+                    .clone())
+            }
         }
-    }
-    // No existing connection, take the inline value instead.
-    else {
-        Ok(graph[input_id].value)
+        _ => {
+            let mut values = Vec::new();
+
+            for &out_id in &conns {
+                // The value was already computed due to the evaluation of some other
+                // node. We simply return value from the cache.
+                if let Some(other_value) = outputs_cache.get(&out_id) {
+                    values.push(other_value.clone())
+                }
+                // This is the first time encountering this node, so we need to
+                // recursively evaluate it.
+                else {
+                    // Calling this will populate the cache
+                    evaluate_node(graph, graph[out_id].node, outputs_cache)?;
+
+                    // Now that we know the value is cached, return it
+                    values.push(
+                        outputs_cache
+                            .get(&out_id)
+                            .expect("Cache should be populated")
+                            .clone(),
+                    );
+                }
+            }
+
+            Ok(MyValueType::Array { values })
+        }
     }
 }
