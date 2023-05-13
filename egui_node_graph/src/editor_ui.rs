@@ -8,7 +8,7 @@ use super::*;
 use egui::epaint::{CubicBezierShape, RectShape};
 use egui::*;
 
-pub type PortLocations = std::collections::HashMap<AnyParameterId, Pos2>;
+pub type PortLocations = std::collections::HashMap<AnyParameterId, Vec<Pos2>>;
 pub type ConnLocations = std::collections::HashMap<(InputId, usize), Pos2>;
 pub type NodeRects = std::collections::HashMap<NodeId, Rect>;
 
@@ -23,6 +23,7 @@ pub enum NodeResponse<UserResponse: UserResponseTrait, NodeData: NodeDataTrait> 
     ConnectEventEnded {
         output: OutputId,
         input: InputId,
+        input_hook: usize,
     },
     CreatedNode(NodeId),
     SelectNode(NodeId),
@@ -223,7 +224,9 @@ where
         if let Some((_, ref locator)) = self.connection_in_progress {
             let port_type = self.graph.any_param_type(*locator).unwrap();
             let connection_color = port_type.data_type_color(user_state);
-            let start_pos = port_locations[locator];
+
+            // outputs can't be wide yet so this is fine.
+            let start_pos = *port_locations[locator].last().unwrap();
 
             // Find a port to connect to
             fn snap_to_ports<
@@ -249,12 +252,19 @@ where
                             .unwrap_or(false);
 
                         if compatible_ports {
-                            port_locations.get(&port_id.into()).and_then(|port_pos| {
-                                if port_pos.distance(cursor_pos) < DISTANCE_TO_CONNECT {
-                                    Some(*port_pos)
-                                } else {
-                                    None
-                                }
+                            port_locations.get(&port_id.into()).and_then(|hooks| {
+                                hooks
+                                    .iter()
+                                    .min_by(|hook1, hook2| {
+                                        hook1
+                                            .distance(cursor_pos)
+                                            .partial_cmp(&hook2.distance(cursor_pos))
+                                            .unwrap()
+                                    })
+                                    .filter(|nearest_hook| {
+                                        nearest_hook.distance(cursor_pos) < DISTANCE_TO_CONNECT
+                                    })
+                                    .copied()
                             })
                         } else {
                             None
@@ -296,7 +306,8 @@ where
                     .any_param_type(AnyParameterId::Output(output))
                     .unwrap();
                 let connection_color = port_type.data_type_color(user_state);
-                let src_pos = port_locations[&AnyParameterId::Output(output)];
+                // outputs can't be wide yet so this is fine.
+                let src_pos = port_locations[&AnyParameterId::Output(output)][0];
                 let dst_pos = conn_locations[&(input, hook_n)];
                 draw_connection(ui.painter(), src_pos, dst_pos, connection_color);
             }
@@ -313,9 +324,11 @@ where
                 NodeResponse::ConnectEventStarted(node_id, port) => {
                     self.connection_in_progress = Some((*node_id, *port));
                 }
-                NodeResponse::ConnectEventEnded { input, output } => {
-                    self.graph.add_connection(*output, *input, 0)
-                }
+                NodeResponse::ConnectEventEnded {
+                    output,
+                    input,
+                    input_hook,
+                } => self.graph.add_connection(*output, *input, *input_hook),
                 NodeResponse::CreatedNode(_) => {
                     //Convenience NodeResponse for users
                 }
@@ -681,14 +694,23 @@ where
                 egui::vec2(
                     10.0,
                     if wide_port {
-                        5.0 + (7.5 * (connections + 1) as f32).max(5.0)
+                        7.5 + (7.5 * (connections + 1) as f32).max(7.5)
                     } else {
                         10.0
                     },
                 ),
             );
 
-            port_locations.insert(param_id, port_rect.center_top() + Vec2::new(2.5, 5.0));
+            port_locations.insert(
+                param_id,
+                (0..connections + 1)
+                    .map(|k| {
+                        port_rect.center_top()
+                            + Vec2::new(2.5, 5.0)
+                            + Vec2::new(0.0, 10.0) * k as f32
+                    })
+                    .collect(),
+            );
 
             let sense = if ongoing_drag.is_some() {
                 Sense::hover()
@@ -721,49 +743,72 @@ where
             }
 
             if connections > 0 {
-                let input = param_id.assume_input();
-                for (i, _) in graph.connections(input).into_iter().enumerate() {
-                    let dst_pos = port_locations[&AnyParameterId::Input(input)]
-                        + Vec2::new(0.0, 10.0) * i as f32;
-                    conn_locations.insert((input, i), dst_pos);
+                if let AnyParameterId::Input(input) = param_id {
+                    for k in 0..graph.connections(input).len() + 1 {
+                        let dst_pos = port_locations[&AnyParameterId::Input(input)][k];
+                        conn_locations.insert((input, k), dst_pos);
+                    }
                 }
             }
 
+            let nearest_hook = ui
+                .input(|in_state| in_state.pointer.hover_pos())
+                .and_then(|mouse_pos| match param_id {
+                    AnyParameterId::Input(input) => Some((mouse_pos, input)),
+                    AnyParameterId::Output(_) => None,
+                })
+                .and_then(|(mouse_pos, input)| {
+                    let hooks = 0..graph.connections(input).len() + 1;
+                    hooks.min_by(|&hook1, &hook2| {
+                        let out1_dist = conn_locations[&(input, hook1)].distance(mouse_pos);
+                        let out2_dist = conn_locations[&(input, hook2)].distance(mouse_pos);
+
+                        out1_dist.partial_cmp(&out2_dist).unwrap()
+                    })
+                });
+
             if resp.drag_started() {
-                if connections > 0 {
-                    if let Some(mouse_pos) = ui.input(|in_state| in_state.pointer.hover_pos()) {
-                        let input = param_id.assume_input();
-                        let outputs = graph.connections(input).into_iter().enumerate();
-                        let (_, output) = outputs
-                            .min_by(|&(hook1, _), &(hook2, _)| {
-                                let out1_dist = conn_locations[&(input, hook1)].distance(mouse_pos);
-                                let out2_dist = conn_locations[&(input, hook2)].distance(mouse_pos);
-
-                                out1_dist.partial_cmp(&out2_dist).unwrap()
-                            })
-                            .unwrap();
-
-                        responses.push(NodeResponse::DisconnectEvent {
-                            input: param_id.assume_input(),
-                            output,
-                        });
+                match param_id {
+                    AnyParameterId::Input(input) => {
+                        match nearest_hook
+                            .and_then(|hook| graph.connections(input).get(hook).copied())
+                        {
+                            Some(output) => {
+                                responses.push(NodeResponse::DisconnectEvent { input, output });
+                            }
+                            None => {
+                                responses
+                                    .push(NodeResponse::ConnectEventStarted(node_id, param_id));
+                            }
+                        }
                     }
-                } else {
-                    responses.push(NodeResponse::ConnectEventStarted(node_id, param_id));
+                    AnyParameterId::Output(_) => {
+                        responses.push(NodeResponse::ConnectEventStarted(node_id, param_id));
+                    }
                 }
             }
 
             if let Some((origin_node, origin_param)) = ongoing_drag {
                 if origin_node != node_id {
                     // Don't allow self-loops
-                    if graph.any_param_type(origin_param).unwrap() == port_type
-                        && close_enough
-                        && ui.input(|i| i.pointer.any_released())
-                    {
+                    if graph.any_param_type(origin_param).unwrap() == port_type && close_enough {
                         match (param_id, origin_param) {
                             (AnyParameterId::Input(input), AnyParameterId::Output(output))
                             | (AnyParameterId::Output(output), AnyParameterId::Input(input)) => {
-                                responses.push(NodeResponse::ConnectEventEnded { input, output });
+                                let input_hook =
+                                    nearest_hook.unwrap_or(graph.connections(input).len());
+
+                                if ui.input(|i| i.pointer.any_released()) {
+                                    responses.push(NodeResponse::ConnectEventEnded {
+                                        output,
+                                        input,
+                                        input_hook,
+                                    });
+                                } else {
+                                    for k in input_hook..graph.connections(input).len() {
+                                        conn_locations.get_mut(&(input, k)).unwrap().y += 7.5;
+                                    }
+                                }
                             }
                             _ => { /* Ignore in-in or out-out connections */ }
                         }
