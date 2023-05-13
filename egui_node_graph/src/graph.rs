@@ -1,4 +1,4 @@
-use std::{collections::HashSet, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use super::*;
 
@@ -91,5 +91,5 @@ pub struct Graph<NodeData, DataType, ValueType> {
     pub outputs: SlotMap<OutputId, OutputParam<DataType>>,
     // Connects the input of a node, to the output of its predecessor that
     // produces it
-    pub connections: SecondaryMap<InputId, HashSet<OutputId>>,
+    pub connections: SecondaryMap<InputId, Vec<OutputId>>,
 }

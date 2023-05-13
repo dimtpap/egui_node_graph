@@ -1,4 +1,4 @@
-use std::{collections::HashSet, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use super::*;
 
@@ -141,7 +141,13 @@ impl<NodeData, DataType, ValueType> Graph<NodeData, DataType, ValueType> {
     pub fn remove_connection(&mut self, input_id: InputId, output_id: OutputId) -> bool {
         self.connections
             .get_mut(input_id)
-            .map(|conns| conns.remove(&output_id))
+            .map(|conns| {
+                let old_size = conns.len();
+                conns.retain(|id| id != &output_id);
+
+                // connection removed if `conn` size changes
+                old_size != conns.len()
+            })
             .unwrap_or(false)
     }
 
@@ -149,16 +155,19 @@ impl<NodeData, DataType, ValueType> Graph<NodeData, DataType, ValueType> {
         self.nodes.iter().map(|(id, _)| id)
     }
 
-    pub fn add_connection(&mut self, output: OutputId, input: InputId) {
+    pub fn add_connection(&mut self, output: OutputId, input: InputId, pos: usize) {
         if !self.connections.contains_key(input) {
-            self.connections.insert(input, HashSet::default());
+            self.connections.insert(input, Vec::default());
         }
-        self.connections[input].insert(output);
+
+        // connecting twice to the same port is a no-op
+        // even for wide ports.
+        if !self.connections[input].contains(&output) {
+            self.connections[input].insert(pos, output);
+        }
     }
 
-    pub fn iter_connection_groups(
-        &self,
-    ) -> impl Iterator<Item = (InputId, HashSet<OutputId>)> + '_ {
+    pub fn iter_connection_groups(&self) -> impl Iterator<Item = (InputId, Vec<OutputId>)> + '_ {
         self.connections.iter().map(|(i, conns)| (i, conns.clone()))
     }
 
@@ -167,7 +176,7 @@ impl<NodeData, DataType, ValueType> Graph<NodeData, DataType, ValueType> {
             .flat_map(|(i, conns)| conns.into_iter().map(move |o| (i, o)))
     }
 
-    pub fn connections(&self, input: InputId) -> HashSet<OutputId> {
+    pub fn connections(&self, input: InputId) -> Vec<OutputId> {
         self.connections.get(input).cloned().unwrap_or_default()
     }
 

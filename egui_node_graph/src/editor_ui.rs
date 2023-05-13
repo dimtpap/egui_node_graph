@@ -9,7 +9,7 @@ use egui::epaint::{CubicBezierShape, RectShape};
 use egui::*;
 
 pub type PortLocations = std::collections::HashMap<AnyParameterId, Pos2>;
-pub type ConnLocations = std::collections::HashMap<(InputId, OutputId), Pos2>;
+pub type ConnLocations = std::collections::HashMap<(InputId, usize), Pos2>;
 pub type NodeRects = std::collections::HashMap<NodeId, Rect>;
 
 const DISTANCE_TO_CONNECT: f32 = 10.0;
@@ -290,14 +290,14 @@ where
 
         // draw existing connections
         for (input, outputs) in self.graph.iter_connection_groups() {
-            for &output in outputs.iter() {
+            for (hook_n, &output) in outputs.iter().enumerate() {
                 let port_type = self
                     .graph
                     .any_param_type(AnyParameterId::Output(output))
                     .unwrap();
                 let connection_color = port_type.data_type_color(user_state);
                 let src_pos = port_locations[&AnyParameterId::Output(output)];
-                let dst_pos = conn_locations[&(input, output)];
+                let dst_pos = conn_locations[&(input, hook_n)];
                 draw_connection(ui.painter(), src_pos, dst_pos, connection_color);
             }
         }
@@ -314,7 +314,7 @@ where
                     self.connection_in_progress = Some((*node_id, *port));
                 }
                 NodeResponse::ConnectEventEnded { input, output } => {
-                    self.graph.add_connection(*output, *input)
+                    self.graph.add_connection(*output, *input, 0)
                 }
                 NodeResponse::CreatedNode(_) => {
                     //Convenience NodeResponse for users
@@ -324,6 +324,7 @@ where
                 }
                 NodeResponse::DeleteNodeUi(node_id) => {
                     let (node, disc_events) = self.graph.remove_node(*node_id);
+
                     // Pass the disconnection responses first so user code can perform cleanup
                     // before node removal response.
                     extra_responses.extend(
@@ -721,10 +722,10 @@ where
 
             if connections > 0 {
                 let input = param_id.assume_input();
-                for (i, output) in graph.connections(input).into_iter().enumerate() {
+                for (i, _) in graph.connections(input).into_iter().enumerate() {
                     let dst_pos = port_locations[&AnyParameterId::Input(input)]
-                        + Vec2::new(0.0, 7.5) * i as f32;
-                    conn_locations.insert((input, output), dst_pos);
+                        + Vec2::new(0.0, 10.0) * i as f32;
+                    conn_locations.insert((input, i), dst_pos);
                 }
             }
 
@@ -732,15 +733,16 @@ where
                 if connections > 0 {
                     if let Some(mouse_pos) = ui.input(|in_state| in_state.pointer.hover_pos()) {
                         let input = param_id.assume_input();
-                        let outputs = graph.connections(input).into_iter();
-                        let output = outputs
-                            .min_by(|&out1, &out2| {
-                                let out1_dist = conn_locations[&(input, out1)].distance(mouse_pos);
-                                let out2_dist = conn_locations[&(input, out2)].distance(mouse_pos);
+                        let outputs = graph.connections(input).into_iter().enumerate();
+                        let (_, output) = outputs
+                            .min_by(|&(hook1, _), &(hook2, _)| {
+                                let out1_dist = conn_locations[&(input, hook1)].distance(mouse_pos);
+                                let out2_dist = conn_locations[&(input, hook2)].distance(mouse_pos);
 
                                 out1_dist.partial_cmp(&out2_dist).unwrap()
                             })
                             .unwrap();
+
                         responses.push(NodeResponse::DisconnectEvent {
                             input: param_id.assume_input(),
                             output,
