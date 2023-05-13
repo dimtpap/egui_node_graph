@@ -577,7 +577,7 @@ fn evaluate_input(
     match conns.len() {
         0 => Ok(graph[input_id].value.clone()),
         1 => {
-            let out_id = *conns.iter().next().unwrap();
+            let out_id = *conns.first().unwrap();
             // The value was already computed due to the evaluation of some other
             // node. We simply return value from the cache.
             if let Some(other_value) = outputs_cache.get(&out_id) {
