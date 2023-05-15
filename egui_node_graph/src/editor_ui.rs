@@ -686,7 +686,7 @@ where
 
         fn port_height(wide_port: bool, connections: usize) -> f32 {
             if wide_port {
-                7.5 + (7.5 * (connections + 1) as f32).max(7.5)
+                5.0 + (10.0 * (connections + 1) as f32).max(10.0)
             } else {
                 10.0
             }
@@ -715,14 +715,7 @@ where
 
             let port_rect = Rect::from_center_size(
                 port_pos,
-                egui::vec2(
-                    10.0,
-                    if wide_port {
-                        7.5 + (7.5 * (connections + 1) as f32).max(7.5)
-                    } else {
-                        10.0
-                    },
-                ),
+                egui::vec2(10.0, port_height(wide_port, connections)),
             );
 
             port_locations.insert(
@@ -730,7 +723,7 @@ where
                 (0..connections + 1)
                     .map(|k| {
                         port_rect.center_top()
-                            + Vec2::new(2.5, 5.0)
+                            + Vec2::new(0.0, 5.0)
                             + Vec2::new(0.0, 10.0) * k as f32
                     })
                     .collect(),
