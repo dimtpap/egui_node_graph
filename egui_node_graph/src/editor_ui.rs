@@ -627,9 +627,25 @@ where
                         }
 
                         self.graph[param_id].value = value;
+                    } else if !self.graph.connections(param_id).is_empty() {
+                        ui.label(param_name);
+                    }
+
+                    let height_intermediate = ui.min_rect().bottom();
+
+                    let port_height = port_height(
+                        self.graph[param_id].max_connections != NonZeroU32::new(1),
+                        self.graph.connections(param_id).len(),
+                    );
+                    let margin = 5.0;
+                    let missing_space =
+                        port_height - (height_intermediate - height_before) + margin;
+                    if missing_space > 0.0 {
+                        ui.add_space(missing_space);
                     }
 
                     let height_after = ui.min_rect().bottom();
+
                     input_port_heights.push((height_before + height_after) / 2.0);
                 }
             }
@@ -667,6 +683,14 @@ where
             mem.data
                 .insert_temp(child_ui.id(), OuterRectMemory(outer_rect))
         });
+
+        fn port_height(wide_port: bool, connections: usize) -> f32 {
+            if wide_port {
+                7.5 + (7.5 * (connections + 1) as f32).max(7.5)
+            } else {
+                10.0
+            }
+        }
 
         #[allow(clippy::too_many_arguments)]
         fn draw_port<NodeData, DataType, ValueType, UserResponse, UserState>(
