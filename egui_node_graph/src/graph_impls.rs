@@ -166,6 +166,11 @@ impl<NodeData, DataType, ValueType> Graph<NodeData, DataType, ValueType> {
             .map(NonZeroU32::get)
             .unwrap_or(std::u32::MAX) as usize;
         if self.connections[input].len() == max_connections {
+            // for short ports, replace the output
+            if max_connections == 1 {
+                self.connections[input][pos] = output;
+            }
+
             return;
         }
 
