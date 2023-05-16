@@ -718,9 +718,11 @@ where
                 egui::vec2(10.0, port_height(wide_port, connections)),
             );
 
+            let inner_ports = if wide_port { connections + 1 } else { 1 };
+
             port_locations.insert(
                 param_id,
-                (0..connections + 1)
+                (0..inner_ports)
                     .map(|k| {
                         port_rect.center_top()
                             + Vec2::new(0.0, 5.0)
@@ -761,9 +763,11 @@ where
 
             if connections > 0 {
                 if let AnyParameterId::Input(input) = param_id {
-                    for k in 0..graph.connections(input).len() + 1 {
-                        let dst_pos = port_locations[&AnyParameterId::Input(input)][k];
-                        conn_locations.insert((input, k), dst_pos);
+                    for (k, dst_pos) in port_locations[&AnyParameterId::Input(input)]
+                        .iter()
+                        .enumerate()
+                    {
+                        conn_locations.insert((input, k), *dst_pos);
                     }
                 }
             }
@@ -775,7 +779,7 @@ where
                     AnyParameterId::Output(_) => None,
                 })
                 .and_then(|(mouse_pos, input)| {
-                    let hooks = 0..graph.connections(input).len() + 1;
+                    let hooks = 0..inner_ports;
                     hooks.min_by(|&hook1, &hook2| {
                         let out1_dist = conn_locations[&(input, hook1)].distance(mouse_pos);
                         let out2_dist = conn_locations[&(input, hook2)].distance(mouse_pos);
@@ -821,7 +825,8 @@ where
                                         input,
                                         input_hook,
                                     });
-                                } else {
+                                } else if wide_port {
+                                    // move connections below the in-progress one to a lower position
                                     for k in input_hook..graph.connections(input).len() {
                                         conn_locations.get_mut(&(input, k)).unwrap().y += 7.5;
                                     }
