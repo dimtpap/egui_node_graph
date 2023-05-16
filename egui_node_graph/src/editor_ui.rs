@@ -633,9 +633,15 @@ where
 
                     let height_intermediate = ui.min_rect().bottom();
 
+                    let max_connections = self.graph[param_id]
+                        .max_connections
+                        .map(NonZeroU32::get)
+                        .unwrap_or(std::u32::MAX)
+                        as usize;
                     let port_height = port_height(
-                        self.graph[param_id].max_connections != NonZeroU32::new(1),
+                        max_connections != 1,
                         self.graph.connections(param_id).len(),
+                        max_connections,
                     );
                     let margin = 5.0;
                     let missing_space =
@@ -684,9 +690,12 @@ where
                 .insert_temp(child_ui.id(), OuterRectMemory(outer_rect))
         });
 
-        fn port_height(wide_port: bool, connections: usize) -> f32 {
+        fn port_height(wide_port: bool, connections: usize, max_connections: usize) -> f32 {
+            let port_full = connections == max_connections;
             if wide_port {
-                5.0 + (10.0 * (connections + 1) as f32).max(10.0)
+                let hooks = connections + if port_full { 0 } else { 1 };
+
+                5.0 + (10.0 * hooks as f32).max(10.0)
             } else {
                 10.0
             }
@@ -706,6 +715,7 @@ where
             ongoing_drag: Option<(NodeId, AnyParameterId)>,
             wide_port: bool,
             connections: usize,
+            max_connections: usize,
         ) where
             DataType: DataTypeTrait<UserState>,
             UserResponse: UserResponseTrait,
@@ -715,10 +725,16 @@ where
 
             let port_rect = Rect::from_center_size(
                 port_pos,
-                egui::vec2(10.0, port_height(wide_port, connections)),
+                egui::vec2(10.0, port_height(wide_port, connections, max_connections)),
             );
 
-            let inner_ports = if wide_port { connections + 1 } else { 1 };
+            let port_full = connections == max_connections;
+
+            let inner_ports = if wide_port {
+                connections + if port_full { 0 } else { 1 }
+            } else {
+                1
+            };
 
             port_locations.insert(
                 param_id,
@@ -825,7 +841,7 @@ where
                                         input,
                                         input_hook,
                                     });
-                                } else if wide_port {
+                                } else if wide_port && !port_full {
                                     // move connections below the in-progress one to a lower position
                                     for k in input_hook..graph.connections(input).len() {
                                         conn_locations.get_mut(&(input, k)).unwrap().y += 7.5;
@@ -853,6 +869,10 @@ where
 
             if should_draw {
                 let pos_left = pos2(port_left, port_height);
+                let max_connections = self.graph[*param]
+                    .max_connections
+                    .map(NonZeroU32::get)
+                    .unwrap_or(std::u32::MAX) as usize;
                 draw_port(
                     ui,
                     self.graph,
@@ -864,12 +884,9 @@ where
                     self.port_locations,
                     self.conn_locations,
                     self.ongoing_drag,
-                    self.graph[*param]
-                        .max_connections
-                        .map(NonZeroU32::get)
-                        .unwrap_or(std::u32::MAX)
-                        > 1,
+                    max_connections > 1,
                     self.graph.connections(*param).len(),
+                    max_connections,
                 );
             }
         }
@@ -894,6 +911,7 @@ where
                 self.ongoing_drag,
                 false,
                 0,
+                1,
             );
         }
 

@@ -165,18 +165,19 @@ impl<NodeData, DataType, ValueType> Graph<NodeData, DataType, ValueType> {
             .max_connections
             .map(NonZeroU32::get)
             .unwrap_or(std::u32::MAX) as usize;
-        if self.connections[input].len() == max_connections {
-            // for short ports, replace the output
-            if max_connections == 1 {
-                self.connections[input][pos] = output;
-            }
-
-            return;
-        }
+        let already_in = self.connections[input].contains(&output);
 
         // connecting twice to the same port is a no-op
         // even for wide ports.
-        if !self.connections[input].contains(&output) {
+        if already_in {
+            return;
+        }
+
+        if self.connections[input].len() == max_connections {
+            // if full, replace the connected output
+            self.connections[input][pos] = output;
+        } else {
+            // otherwise, insert at a selected position
             self.connections[input].insert(pos, output);
         }
     }
