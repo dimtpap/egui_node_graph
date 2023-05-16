@@ -627,7 +627,7 @@ where
                         }
 
                         self.graph[param_id].value = value;
-                    } else if !self.graph.connections(param_id).is_empty() {
+                    } else {
                         ui.label(param_name);
                     }
 
