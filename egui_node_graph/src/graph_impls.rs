@@ -160,6 +160,15 @@ impl<NodeData, DataType, ValueType> Graph<NodeData, DataType, ValueType> {
             self.connections.insert(input, Vec::default());
         }
 
+        let max_connections = self
+            .get_input(input)
+            .max_connections
+            .map(NonZeroU32::get)
+            .unwrap_or(std::u32::MAX) as usize;
+        if self.connections[input].len() == max_connections {
+            return;
+        }
+
         // connecting twice to the same port is a no-op
         // even for wide ports.
         if !self.connections[input].contains(&output) {
