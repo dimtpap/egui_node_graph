@@ -87,7 +87,7 @@ pub struct GraphNodeWidget<'a, NodeData, DataType, ValueType> {
     pub pan: egui::Vec2,
 }
 
-impl<NodeData, DataType, ValueType, NodeTemplate, UserResponse, UserState>
+impl<NodeData, DataType, ValueType, NodeTemplate, UserResponse, UserState, CategoryType>
     GraphEditorState<NodeData, DataType, ValueType, NodeTemplate, UserState>
 where
     NodeData: NodeDataTrait<
@@ -104,8 +104,10 @@ where
         DataType = DataType,
         ValueType = ValueType,
         UserState = UserState,
+        CategoryType = CategoryType,
     >,
     DataType: DataTypeTrait<UserState>,
+    CategoryType: CategoryTrait,
 {
     #[must_use]
     pub fn draw_graph_editor(
@@ -118,12 +120,12 @@ where
         // (so for windows it will use up to the resizeably set limit
         // and for a Panel it will fill it completely)
         let editor_rect = ui.max_rect();
-        ui.allocate_rect(editor_rect, Sense::hover());
+        let resp = ui.allocate_rect(editor_rect, Sense::hover());
 
         let cursor_pos = ui
             .ctx()
             .input(|i| i.pointer.hover_pos().unwrap_or(Pos2::ZERO));
-        let mut cursor_in_editor = editor_rect.contains(cursor_pos);
+        let mut cursor_in_editor = resp.hovered();
         let mut cursor_in_finder = false;
 
         // Gets filled with the node metrics as they are drawn
@@ -631,6 +633,14 @@ where
                         ui.label(param_name);
                     }
 
+                    self.graph[self.node_id].user_data.separator(
+                        ui,
+                        self.node_id,
+                        AnyParameterId::Input(param_id),
+                        self.graph,
+                        user_state,
+                    );
+
                     let height_intermediate = ui.min_rect().bottom();
 
                     let max_connections = self.graph[param_id]
@@ -657,7 +667,7 @@ where
             }
 
             let outputs = self.graph[self.node_id].outputs.clone();
-            for (param_name, _param) in outputs {
+            for (param_name, param_id) in outputs {
                 let height_before = ui.min_rect().bottom();
                 responses.extend(
                     self.graph[self.node_id]
@@ -665,6 +675,15 @@ where
                         .output_ui(ui, self.node_id, self.graph, user_state, &param_name)
                         .into_iter(),
                 );
+
+                self.graph[self.node_id].user_data.separator(
+                    ui,
+                    self.node_id,
+                    AnyParameterId::Output(param_id),
+                    self.graph,
+                    user_state,
+                );
+
                 let height_after = ui.min_rect().bottom();
                 output_port_heights.push((height_before + height_after) / 2.0);
             }
