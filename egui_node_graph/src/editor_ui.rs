@@ -8,8 +8,20 @@ use super::*;
 use egui::epaint::{CubicBezierShape, RectShape};
 use egui::*;
 
+/// Mapping from parameter id to positions of hooks it contains.
+///
+/// Outputs and short inputs always only have one hook, so the value is
+/// just `vec![port_position]`. Wide inputs may have multiple hooks.
 pub type PortLocations = std::collections::HashMap<AnyParameterId, Vec<Pos2>>;
-pub type ConnLocations = std::collections::HashMap<(InputId, usize), Pos2>;
+
+/// Destination positions of connections made to a given input.
+///
+/// This is not equivalent to [`PortLocations`] because connections may be moved
+/// around (e.g. while an in-progress connection is hovered over a wide port),
+/// while hooks within a port are strictly a function of the port.
+pub type ConnLocations = std::collections::HashMap<InputId, Vec<Pos2>>;
+
+/// Rectangle containing each node.
 pub type NodeRects = std::collections::HashMap<NodeId, Rect>;
 
 const DISTANCE_TO_CONNECT: f32 = 10.0;
@@ -23,6 +35,9 @@ pub enum NodeResponse<UserResponse: UserResponseTrait, NodeData: NodeDataTrait> 
     ConnectEventEnded {
         output: OutputId,
         input: InputId,
+        /// Index of the connection in wide input ports.
+        ///
+        /// If the input isn't a wide port this is always 0 and may be ignored.
         input_hook: usize,
     },
     CreatedNode(NodeId),
@@ -310,7 +325,7 @@ where
                 let connection_color = port_type.data_type_color(user_state);
                 // outputs can't be wide yet so this is fine.
                 let src_pos = port_locations[&AnyParameterId::Output(output)][0];
-                let dst_pos = conn_locations[&(input, hook_n)];
+                let dst_pos = conn_locations[&input][hook_n];
                 draw_connection(ui.painter(), src_pos, dst_pos, connection_color);
             }
         }
@@ -802,7 +817,7 @@ where
                         .iter()
                         .enumerate()
                     {
-                        conn_locations.insert((input, k), *dst_pos);
+                        conn_locations.entry(input).or_default().insert(k, *dst_pos);
                     }
                 }
             }
@@ -816,8 +831,8 @@ where
                 .and_then(|(mouse_pos, input)| {
                     let hooks = 0..inner_ports;
                     hooks.min_by(|&hook1, &hook2| {
-                        let out1_dist = conn_locations[&(input, hook1)].distance(mouse_pos);
-                        let out2_dist = conn_locations[&(input, hook2)].distance(mouse_pos);
+                        let out1_dist = conn_locations[&input][hook1].distance(mouse_pos);
+                        let out2_dist = conn_locations[&input][hook2].distance(mouse_pos);
 
                         out1_dist.partial_cmp(&out2_dist).unwrap()
                     })
@@ -863,7 +878,7 @@ where
                                 } else if wide_port && !port_full {
                                     // move connections below the in-progress one to a lower position
                                     for k in input_hook..graph.connections(input).len() {
-                                        conn_locations.get_mut(&(input, k)).unwrap().y += 7.5;
+                                        conn_locations.get_mut(&input).unwrap()[k].y += 7.5;
                                     }
                                 }
                             }
