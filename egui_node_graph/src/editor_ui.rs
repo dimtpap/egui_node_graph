@@ -141,11 +141,8 @@ where
 
         // Zoom only within area where graph is shown
         if ui.rect_contains_pointer(clip_rect) {
-            let scroll_delta = ui.input(|i| i.scroll_delta.y);
-            if scroll_delta != 0.0 {
-                let zoom_delta = (scroll_delta * 0.002).exp();
-                self.zoom(ui, zoom_delta);
-            }
+            let zoom_delta = ui.input(|i| i.zoom_delta());
+            self.zoom(ui, zoom_delta);
         }
 
         // Render graph zoomed
