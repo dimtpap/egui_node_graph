@@ -1135,7 +1135,8 @@ where
 
         // Movement
         let drag_delta = window_response.drag_delta();
-        if drag_delta.length_sq() > 0.0 {
+        if window_response.dragged_by(egui::PointerButton::Primary) && drag_delta.length_sq() > 0.0
+        {
             responses.push(NodeResponse::MoveNode {
                 node: self.node_id,
                 drag_delta,
