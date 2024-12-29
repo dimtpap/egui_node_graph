@@ -3,13 +3,13 @@ name = "egui_node_graph_example"
 version = "0.1.0"
 authors = ["setzer22"]
 edition = "2021"
-rust-version = "1.56"
+rust-version = "1.80"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-eframe = "0.29"
+eframe = "0.30"
 egui_node_graph = { path = "../egui_node_graph" }
 anyhow = "1.0"
 serde = { version = "1.0", optional = true }
